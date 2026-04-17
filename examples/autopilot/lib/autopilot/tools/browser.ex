@@ -21,21 +21,149 @@ defmodule Autopilot.Tools.Browser do
     })
   end
 
+  @debug_click false
+
   def click do
     Function.new!(%{
       name: "click",
-      description: "Click at x,y coordinates. Get coordinates from find_element first.",
+      description: """
+      Click at x,y coordinates. Get coordinates from find_element first.
+
+      Set verify=true when clicking to:
+      - Close popups, modals, dialogs, overlays, cookie banners
+      - Interact with dropdowns, tabs, accordions, toggles
+      - Dismiss ads or notifications
+      - Any in-page component where navigation doesn't happen
+
+      When verify=true, provide expect with what should happen.
+      The tool will take screenshots before and after, compare them with VLM,
+      and tell you exactly what changed. Do NOT call see_screen after a verified click.
+      """,
       parameters: [
         FunctionParam.new!(%{name: "x", type: :integer, required: true, description: "X coordinate"}),
-        FunctionParam.new!(%{name: "y", type: :integer, required: true, description: "Y coordinate"})
+        FunctionParam.new!(%{name: "y", type: :integer, required: true, description: "Y coordinate"}),
+        FunctionParam.new!(%{name: "verify", type: :boolean, required: false,
+          description: "Set true to visually verify what changed after clicking"}),
+        FunctionParam.new!(%{name: "expect", type: :string, required: false,
+          description: "What should happen, e.g. 'close the popup', 'open dropdown'. Required when verify=true."})
       ],
-      function: fn %{"x" => x, "y" => y}, _context ->
-        case Autopilot.Browser.click(x, y) do
-          {:ok, _}         -> {:ok, "Clicked at (#{x}, #{y})"}
-          {:error, reason} -> {:error, "click failed: #{inspect(reason)}"}
+      function: fn args, _context ->
+        x      = args["x"]
+        y      = args["y"]
+        verify = args["verify"] || false
+        expect = args["expect"] || ""
+
+        # Debug beacon
+        if @debug_click do
+          show_beacon(x, y)
+          Process.sleep(2000)
+        end
+
+        if verify do
+          click_with_verify(x, y, expect)
+        else
+          click_simple(x, y)
         end
       end
     })
+  end
+
+  defp click_simple(x, y) do
+    case Autopilot.Browser.click(x, y) do
+      {:ok, _}         -> {:ok, "Clicked at (#{x}, #{y})"}
+      {:error, reason} -> {:error, "click failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp click_with_verify(x, y, expect) do
+    # Screenshot BEFORE
+    before_b64 = case Autopilot.Browser.screenshot() do
+      {:ok, b64} -> b64
+      _          -> nil
+    end
+
+    # Click
+    case Autopilot.Browser.click(x, y) do
+      {:ok, _} ->
+        # Wait for page to react
+        Process.sleep(800)
+
+        # Screenshot AFTER
+        after_b64 = case Autopilot.Browser.screenshot() do
+          {:ok, b64} -> b64
+          _          -> nil
+        end
+
+        # Compare via Vision API
+        if before_b64 && after_b64 do
+          case call_compare(before_b64, after_b64, expect) do
+            {:ok, result} ->
+              verdict   = result["verdict"] || "UNCLEAR"
+              summary   = result["summary"] || ""
+              changed   = result["changed"] || ""
+              disappeared = result["disappeared"] || ""
+              appeared  = result["appeared"] || ""
+
+              {:ok, """
+              Clicked at (#{x}, #{y}) — VERIFIED.
+              VERDICT: #{verdict}
+              EXPECTED: #{expect}
+              CHANGED: #{changed}
+              DISAPPEARED: #{disappeared}
+              APPEARED: #{appeared}
+              SUMMARY: #{summary}
+              Do NOT call see_screen to double-check. Trust this result and move on.
+              """}
+
+            {:error, reason} ->
+              {:ok, "Clicked at (#{x}, #{y}). Verification failed: #{inspect(reason)}. Use extract_text to check."}
+          end
+        else
+          {:ok, "Clicked at (#{x}, #{y}). Could not take screenshots for verification."}
+        end
+
+      {:error, reason} ->
+        {:error, "click failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp call_compare(before_b64, after_b64, expectation) do
+    require Logger
+    base = Application.get_env(:autopilot, :vision_url, "http://localhost:5001")
+
+    Logger.debug("Vision /compare: expect=#{expectation}")
+
+    case Req.post(base <> "/compare", json: %{
+      before: before_b64,
+      after: after_b64,
+      expectation: expectation
+    }, receive_timeout: 60_000) do
+      {:ok, %{status: 200, body: resp}} ->
+        Logger.debug("Vision /compare OK: verdict=#{resp["verdict"]}")
+        {:ok, resp}
+      {:ok, %{status: status, body: resp}} ->
+        Logger.error("Vision /compare #{status}: #{inspect(resp)}")
+        {:error, "Vision API returned #{status}"}
+      {:error, reason} ->
+        Logger.error("Vision /compare error: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp show_beacon(x, y) do
+    js = """
+    (function() {
+      var dot = document.createElement('div');
+      dot.style.cssText = 'position:fixed;left:#{x - 10}px;top:#{y - 10}px;width:20px;height:20px;' +
+        'background:red;border-radius:50%;z-index:999999;pointer-events:none;' +
+        'border:3px solid yellow;box-shadow:0 0 10px red;';
+      dot.id = 'click-beacon';
+      var old = document.getElementById('click-beacon');
+      if (old) old.remove();
+      document.body.appendChild(dot);
+    })()
+    """
+    Autopilot.Browser.eval(js)
   end
 
   def type_text do

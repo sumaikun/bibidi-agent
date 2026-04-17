@@ -200,16 +200,14 @@ defmodule Autopilot.Tools.Vision do
     Function.new!(%{
       name: "deep_search",
       description: """
-      Visual element search using VLM on an annotated screenshot.
+      Visual element search using VLM + semantic search.
       Use when find_element and scan_dom fail to locate the element you need.
-      Handles custom components (React selects, date pickers, shadow DOM,
-      overlays, iframes, ad popups) that text search can't find.
-      Describe what you want to do in plain language.
-      Returns coordinates of the target element.
+      Handles custom components, overlays, iframes, ad popups.
+      Returns ranked candidates — pick the best match.
       """,
       parameters: [
         FunctionParam.new!(%{name: "question", type: :string, required: true,
-          description: "What you need, e.g. 'how do I close the SUV popup?', 'where is the date picker?'"}),
+          description: "What you need, e.g. 'how do I close the SUV popup?'"}),
         FunctionParam.new!(%{name: "url", type: :string, required: true,
           description: "Current page URL"})
       ],
@@ -218,14 +216,20 @@ defmodule Autopilot.Tools.Vision do
             {:ok, resp} <- call_vision("/deep_search", %{
               screenshot: b64, question: question, url: url
             }) do
-          target = resp["target"]
+          candidates = resp["candidates"] || []
 
-          if target do
-            selector = if target["selector"], do: " selector=#{target["selector"]}", else: ""
-            {:ok, "Found: [#{target["x"]}, #{target["y"]}] #{target["content"]}#{selector}" <>
-                " (index=#{resp["index"]})"}
+          if candidates != [] do
+            result = candidates
+              |> Enum.with_index()
+              |> Enum.map(fn {c, i} ->
+                selector = if c["selector"], do: " selector=#{c["selector"]}", else: ""
+                "[#{i}] (#{c["confidence"]}) [#{c["x"]}, #{c["y"]}] #{c["content"]}#{selector} via #{c["resolution"]}"
+              end)
+              |> Enum.join("\n")
+
+            {:ok, "Found #{length(candidates)} candidate(s):\n#{result}\n\nVLM: #{resp["description"]}"}
           else
-            {:ok, "Could not identify element. VLM response: #{resp["description"]}"}
+            {:ok, "No candidates found. VLM response: #{resp["description"]}"}
           end
         else
           {:error, reason} -> {:error, "deep_search failed: #{inspect(reason)}"}

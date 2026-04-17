@@ -36,11 +36,28 @@ defmodule Autopilot.Browser do
 
   @impl true
   def init(_opts) do
-    ws_url = Application.get_env(:autopilot, :browser_ws_url, "ws://localhost:9222/session")
+    browser = Application.get_env(:autopilot, :browser, "firefox")
+
+    case browser do
+      "firefox" ->
+        ws_url = Application.get_env(:autopilot, :firefox_ws_url, "ws://localhost:9222")
+        connect_firefox(ws_url)
+
+      "chrome" ->
+        url = Application.get_env(:autopilot, :chromedriver_url, "http://localhost:9515")
+        connect_chrome(url)
+
+      other ->
+        {:stop, "Unknown browser: #{other}"}
+    end
+  end
+
+  defp connect_firefox(ws_url) do
+    IO.puts(">> Firefox BiDi: #{ws_url}")
 
     with {:ok, conn}  <- Bibbidi.Connection.start_link(url: ws_url),
-         {:ok, _caps} <- Bibbidi.Session.new(conn),
-         {:ok, tree}  <- BrowsingContext.get_tree(conn) do
+        {:ok, _caps} <- Bibbidi.Session.new(conn),
+        {:ok, tree}  <- BrowsingContext.get_tree(conn) do
       context = hd(tree["contexts"])["context"]
       {:ok, %{conn: conn, context: context}}
     else
@@ -48,9 +65,51 @@ defmodule Autopilot.Browser do
     end
   end
 
+  defp connect_chrome(chromedriver_url) do
+    IO.puts(">> Creating Chrome session via #{chromedriver_url}")
+
+    body = %{
+      "capabilities" => %{
+        "alwaysMatch" => %{
+          "browserName" => "chrome",
+          "goog:chromeOptions" => %{
+            "args" => [
+              #"--headless=new",
+              "--disable-gpu",
+              "--window-size=1280,900"
+            ]
+          },
+          "webSocketUrl" => true
+        }
+      }
+    }
+
+    case Req.post("#{chromedriver_url}/session", json: body) do
+      {:ok, %{status: 200, body: resp}} ->
+        ws_url = get_in(resp, ["value", "capabilities", "webSocketUrl"])
+        session_id = get_in(resp, ["value", "sessionId"])
+        IO.puts(">> Chrome BiDi WS: #{ws_url}")
+
+        with {:ok, conn} <- Bibbidi.Connection.start_link(url: ws_url),
+            {:ok, tree} <- BrowsingContext.get_tree(conn) do
+          context = hd(tree["contexts"])["context"]
+          {:ok, %{conn: conn, context: context, session_id: session_id}}
+        else
+          {:error, reason} -> {:stop, reason}
+        end
+
+      {:ok, %{status: status, body: err}} ->
+        {:stop, "ChromeDriver session failed (#{status}): #{inspect(err)}"}
+
+      {:error, reason} ->
+        {:stop, "Can't reach ChromeDriver: #{inspect(reason)}"}
+    end
+  end
+
   @impl true
   def handle_call({:navigate, url}, _from, %{conn: conn, context: ctx} = state) do
-    result = BrowsingContext.navigate(conn, ctx, url, wait: "complete")
+    #result = BrowsingContext.navigate(conn, ctx, url, wait: "complete")
+    result = BrowsingContext.navigate(conn, ctx, url, wait: "interactive")
     {:reply, result, state}
   end
 

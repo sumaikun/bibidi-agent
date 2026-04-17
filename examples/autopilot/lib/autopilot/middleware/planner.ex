@@ -28,7 +28,7 @@ defmodule Autopilot.Middleware.Planner do
     - detect_captcha_grid: Detect the CAPTCHA image grid bounding box
     - solve_captcha: All-in-one CAPTCHA solver — detects grid, identifies object, returns cells to click
     - segment: SAM3 visual segmentation — find physical objects in screenshots (for CAPTCHAs, not UI elements)
-    - click: Click at x,y coordinates
+    - click: Click at x,y coordinates. Supports visual verification (see below).
     - type_text: Type text into an input by CSS selector (native keyboard events)
     - press_key: Press keyboard keys (Enter, Tab, Escape, ArrowDown)
     - scroll: Scroll page up or down
@@ -52,6 +52,24 @@ defmodule Autopilot.Middleware.Planner do
     8. If layout changed → embed_page again to refresh
     9. Repeat until done
     10. ALWAYS call task_complete at the end
+
+    ## Click verification (verify=true):
+    Set verify=true and provide expect when clicking to:
+    - Close popups, modals, dialogs, overlays, cookie banners
+    - Interact with dropdowns, tabs, accordions, toggles
+    - Dismiss ads or notifications
+    - Any in-page UI component where you need to confirm the result
+
+    When verify=true, the tool takes screenshots before and after your click,
+    sends both to a vision model, and returns a VERDICT telling you exactly
+    what changed. Trust the verdict. Do NOT call see_screen after a verified click.
+
+    Example:
+      click(x=774, y=231, verify=true, expect="close the MG Colombia popup")
+      → Returns: VERDICT: SUCCESS, DISAPPEARED: popup with "El SUV que lo tiene todo"
+
+    Do NOT use verify for simple navigation clicks (links, search results) —
+    those change the URL and you can check with get_current_url instead.
 
     ## Element finding priority:
     1. find_element — text search (fast, handles most cases)
@@ -114,6 +132,13 @@ defmodule Autopilot.Middleware.Planner do
     - NEVER fabricate URLs — always use href from get_links or find_element
     - NEVER retry the same failing action more than twice — change strategy
     - NEVER use see_screen to read text content — use extract_text or extract_article
+
+    ## Task completion:
+    When the task is complete, provide a clear friendly summary:
+    - What was accomplished
+    - Any important results or content found
+    - Steps that required human input or CAPTCHA solving
+    Keep it concise.
     """
   end
 

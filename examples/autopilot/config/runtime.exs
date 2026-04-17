@@ -7,7 +7,9 @@ IO.puts(">> Config loaded - provider: #{System.get_env("PLANNER_PROVIDER", "anth
 
 config :autopilot,
   # Browser
-  browser_ws_url: env!("BROWSER_WS_URL", :string, "ws://localhost:9222/session"),
+  browser:          env!("BROWSER",          :string, "firefox"),
+  firefox_ws_url:   env!("FIREFOX_WS_URL",   :string, "ws://localhost:9222"),
+  chromedriver_url: env!("CHROMEDRIVER_URL",  :string, "http://localhost:9515"),
 
   # Vision API (unified: YOLO + txtai + SAM3 + CAPTCHA + VLM)
   vision_url: env!("VISION_URL", :string, "http://localhost:5001"),

@@ -14,8 +14,6 @@ defmodule Autopilot.Agent do
       middleware: [
         Autopilot.Middleware.Planner,
         Autopilot.Middleware.ContextPruner,
-        Autopilot.Middleware.Validator,
-        Autopilot.Middleware.Narrator,
         Autopilot.Middleware.Observer
       ]
     })
