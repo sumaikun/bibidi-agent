@@ -31,9 +31,10 @@ defmodule Autopilot.Tools.Browser do
 
       Set verify=true when clicking to:
       - Close popups, modals, dialogs, overlays, cookie banners
-      - Interact with dropdowns, tabs, accordions, toggles
+      - Interact with custom  dropdowns, tabs, accordions, toggles or complex components
       - Dismiss ads or notifications
       - Any in-page component where navigation doesn't happen
+      - If is possible to verify with dom don't apply Ai verify, like navigation confirmation
 
       When verify=true, provide expect with what should happen.
       The tool will take screenshots before and after, compare them with VLM,
@@ -69,13 +70,16 @@ defmodule Autopilot.Tools.Browser do
   end
 
   defp click_simple(x, y) do
+    Autopilot.TaskLog.log("CLICK", "(#{x}, #{y}) verify=false")
     case Autopilot.Browser.click(x, y) do
       {:ok, _}         -> {:ok, "Clicked at (#{x}, #{y})"}
       {:error, reason} -> {:error, "click failed: #{inspect(reason)}"}
     end
   end
 
+
   defp click_with_verify(x, y, expect) do
+    Autopilot.TaskLog.log("CLICK", "(#{x}, #{y}) verify=true expect=#{expect}")
     # Screenshot BEFORE
     before_b64 = case Autopilot.Browser.screenshot() do
       {:ok, b64} -> b64

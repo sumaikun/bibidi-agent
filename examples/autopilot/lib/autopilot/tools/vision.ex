@@ -379,13 +379,15 @@ defmodule Autopilot.Tools.Vision do
       All-in-one CAPTCHA image grid solver. Takes a screenshot and returns
       exactly which grid cells to click.
 
+      IMPORTANT: Call this ONLY ONCE per CAPTCHA. After clicking the returned
+      cells, your next step is to click the VERIFY button — NOT to call
+      solve_captcha again. Re-running deselects your previous clicks.
+
       Internally: detects grid (YOLO) → identifies object + grid type (VLM) →
       segments object (SAM3) → maps mask to grid cells.
 
       Returns a list of click_targets with {x, y} coordinates.
       Click each coordinate, then click VERIFY/NEXT.
-
-      Optional: pass object_hint ("bus"), rows (3), cols (3) to skip VLM.
       """,
       parameters: [
         FunctionParam.new!(%{name: "object_hint", type: :string, required: false,
@@ -414,9 +416,20 @@ defmodule Autopilot.Tools.Vision do
               |> Enum.map(fn t -> "  click(#{t["x"]}, #{t["y"]})  # cell [#{t["row"]},#{t["col"]}]" end)
               |> Enum.join("\n")
 
-            {:ok, "CAPTCHA solved: '#{resp["prompt"]}' #{resp["rows"]}x#{resp["cols"]} grid\n" <>
-                  "Click #{length(targets)} cell(s):\n#{coords}\n" <>
-                  "Then click VERIFY/NEXT button."}
+            {:ok, """
+              CAPTCHA solved: '#{resp["prompt"]}' #{resp["rows"]}x#{resp["cols"]} grid
+              Click these #{length(targets)} cell(s) in order, ONCE each:
+              #{coords}
+
+              CRITICAL NEXT STEPS (DO ALL OF THESE, DO NOT CALL solve_captcha OR segment AGAIN):
+              1. Click each cell above, exactly once.
+              2. Call find_element with query="Verify" or "Next" or "Skip" to locate the verify button.
+              3. Click the verify button.
+              4. Then call see_screen to check the result.
+
+              WARNING: clicking a cell twice DESELECTS it. Do NOT re-run solve_captcha
+              after clicking — the cells you selected will be undone.
+              """}
           else
             {:ok, "CAPTCHA solve failed: #{resp["error"] || "unknown error"}"}
           end
@@ -501,7 +514,13 @@ defmodule Autopilot.Tools.Vision do
               |> Enum.flat_map(fn r -> r["click_targets"] || [r["click_target"]] end)
               |> length()
 
-            {:ok, "Found #{length(found)} instance(s), #{total_clicks} click target(s):\n#{summary}"}
+            {:ok, """
+              Found #{length(found)} instance(s), #{total_clicks} click target(s):
+              #{summary}
+
+              After clicking these, if this was a CAPTCHA: find and click the VERIFY button next.
+              Do NOT call segment or solve_captcha again — re-clicking the same cells DESELECTS them.
+              """}
           end
         else
           {:error, reason} -> {:error, "segment failed: #{inspect(reason)}"}
